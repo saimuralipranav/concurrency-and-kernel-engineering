@@ -256,7 +256,7 @@ create(char *path, short type, short major, short minor)
   if ((ip = dirlookup(dp, name, 0)) != 0) {
     iunlockput(dp);
     ilock(ip);
-    if (type == T_FILE && (ip->type == T_FILE || ip->type == T_DEVICE))
+    if (type == T_FILE && (ip->type == T_FILE || ip->type == T_DEVICE || ip->type == T_SYMLINK))
       return ip;
     iunlockput(ip);
     return 0;
@@ -328,6 +328,36 @@ sys_open(void)
       return -1;
     }
     ilock(ip);
+    if (ip->type == T_DIR && omode != O_RDONLY) {
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+  }
+
+  if (ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
+    int depth = 0;
+    while (ip->type == T_SYMLINK) {
+      if (depth >= 10) {
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+      depth++;
+      if (readi(ip, 0, (uint64)path, 0, ip->size) != ip->size) {
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+      path[ip->size] = 0;
+      iunlockput(ip);
+
+      if ((ip = namei(path)) == 0) {
+        end_op();
+        return -1;
+      }
+      ilock(ip);
+    }
     if (ip->type == T_DIR && omode != O_RDONLY) {
       iunlockput(ip);
       end_op();
