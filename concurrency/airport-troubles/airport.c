@@ -143,6 +143,15 @@ static void* student_thread_func(void* arg) {
             fflush(stdout);
         }
 
+        // 5. Collect bag (takes 1 time unit)
+        if (s->left_hall_at != -1 && s->left_hall_at <= current_time - 1 &&
+            s->bag_on_belt && s->collected_at == -1) {
+            s->collected_at = current_time;
+            s->bag_on_belt = false;
+            printf("%d Student %d collects bag\n", current_time, s->id);
+            fflush(stdout);
+        }
+
         advance_turn();
         pthread_barrier_wait(&tick_end_barrier);
     }
@@ -218,7 +227,25 @@ static void* handler_thread_func(void* arg) {
 
         wait_for_turn(h->index);
 
-        // Baggage handler workflow will be populated in next commits
+        // If idle and belt has free slot, find next ready bag
+        if (h->current_student_id == -1 && belt_slots_free > 0) {
+            for (int i = 0; i < num_students; i++) {
+                Student* s = &students[i];
+                if (s->stamped_at != -1 && s->stamped_at <= current_time - 1 &&
+                    !s->bag_queued) {
+                    s->bag_queued = true;
+                    s->bag_loaded_at = current_time;
+                    belt_slots_free--;
+                    h->current_student_id = s->id;
+                    h->busy_until = current_time + 1;
+
+                    printf("%d Baggage handler %d loads bag for Student %d\n",
+                           current_time, h->id, s->id);
+                    fflush(stdout);
+                    break;
+                }
+            }
+        }
 
         advance_turn();
         pthread_barrier_wait(&tick_end_barrier);
