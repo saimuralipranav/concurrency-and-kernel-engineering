@@ -119,6 +119,30 @@ static void* student_thread_func(void* arg) {
             }
         }
 
+        // 3. Receive stamp (takes 1 time unit)
+        if (s->scanned && s->approved && s->stamped_at == -1) {
+            int app_time = -1;
+            for (int v = 0; v < num_officer_visits; v++) {
+                if (officer_visits[v].approved && officer_visits[v].approved_at <= current_time - 1) {
+                    app_time = officer_visits[v].approved_at;
+                }
+            }
+            if (app_time != -1) {
+                s->stamped_at = current_time;
+                printf("%d Student %d receives stamp\n", current_time, s->id);
+                fflush(stdout);
+            }
+        }
+
+        // 4. Leave hall (takes 1 time unit)
+        if (s->stamped_at != -1 && s->stamped_at <= current_time - 1 &&
+            s->left_hall_at == -1 && !officer_in_hall) {
+            s->left_hall_at = current_time;
+            s->in_hall = false;
+            printf("%d Student %d leaves hall\n", current_time, s->id);
+            fflush(stdout);
+        }
+
         advance_turn();
         pthread_barrier_wait(&tick_end_barrier);
     }
@@ -135,7 +159,48 @@ static void* officer_thread_func(void* arg) {
 
         wait_for_turn(my_turn);
 
-        // Officer workflow will be populated in next commits
+        if (current_visit_idx < num_officer_visits) {
+            OfficerVisit* v = &officer_visits[current_visit_idx];
+
+            // 1. Enter hall
+            if (!v->entered && current_time >= v->visit_time) {
+                v->entered = true;
+                v->entered_at = current_time;
+                officer_in_hall = true;
+                printf("%d Immigration officer 1 enters\n", current_time);
+                fflush(stdout);
+            }
+
+            // 2. Approve batch
+            if (v->entered && !v->approved && v->entered_at <= current_time - 1) {
+                bool all_scanned = true;
+                for (int i = 0; i < num_students; i++) {
+                    if (students[i].in_hall && !students[i].scanned) {
+                        all_scanned = false;
+                        break;
+                    }
+                }
+                if (all_scanned) {
+                    v->approved = true;
+                    v->approved_at = current_time;
+                    for (int i = 0; i < num_students; i++) {
+                        if (students[i].in_hall && students[i].scanned && !students[i].approved) {
+                            students[i].approved = true;
+                        }
+                    }
+                    printf("%d Immigration officer 1 approves\n", current_time);
+                    fflush(stdout);
+                }
+            }
+
+            // 3. Leave hall
+            if (v->approved && !v->left && v->approved_at <= current_time - 1) {
+                v->left = true;
+                v->left_at = current_time;
+                printf("%d Immigration officer 1 leaves\n", current_time);
+                fflush(stdout);
+            }
+        }
 
         advance_turn();
         pthread_barrier_wait(&tick_end_barrier);
