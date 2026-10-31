@@ -1,0 +1,8 @@
+7
+0 Student 1
+0 Student 2
+0 Student 3
+1 Student 4
+3 Immigration officer 1
+4 Student 5
+9 Immigration officer 1
