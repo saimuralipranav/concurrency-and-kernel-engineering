@@ -1,3 +1,7 @@
+// Automated test suite for xv6 symlink implementation
+// Tests: basic symlinks, multi-hop chains, cycle detection, O_NOFOLLOW,
+// O_CREATE on existing symlink, and concurrent symlink creation/deletion.
+
 #include "kernel/param.h"
 #include "kernel/types.h"
 #include "kernel/stat.h"
