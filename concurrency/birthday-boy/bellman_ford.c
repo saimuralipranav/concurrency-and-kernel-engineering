@@ -18,7 +18,10 @@ typedef struct {
     int num_edges;
     Edge* edges;
     int* dist;
-    pthread_barrier_t* barrier;
+    bool* thread_changed;
+    pthread_barrier_t* barrier1;
+    pthread_barrier_t* barrier2;
+    bool* terminated;
 } WorkerArgs;
 
 static void* worker_func(void* arg) {
@@ -30,12 +33,12 @@ static void* worker_func(void* arg) {
     Edge* edges = w->edges;
     int* dist = w->dist;
 
-    int chunk = (M + T - 1) / T;
-    int start = tid * chunk;
-    int end = start + chunk;
-    if (end > M) end = M;
+    int start = (int)(((long long)tid * M) / T);
+    int end = (int)(((long long)(tid + 1) * M) / T);
 
     for (int iter = 0; iter < V - 1; iter++) {
+        bool local_changed = false;
+
         for (int i = start; i < end; i++) {
             int u = edges[i].u;
             int v = edges[i].v;
@@ -43,13 +46,42 @@ static void* worker_func(void* arg) {
             int du = dist[u];
             if (du != INF) {
                 int new_dist = du + 1;
-                if (new_dist < dist[v]) {
-                    dist[v] = new_dist;
+                int old_dist = dist[v];
+                while (new_dist < old_dist) {
+                    if (__atomic_compare_exchange_n(&dist[v], &old_dist, new_dist,
+                                                   false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+                        local_changed = true;
+                        break;
+                    }
                 }
             }
         }
 
-        pthread_barrier_wait(w->barrier);
+        w->thread_changed[tid] = local_changed;
+
+        // Synchronize after relaxation
+        pthread_barrier_wait(w->barrier1);
+
+        // Thread 0 checks if any thread made changes
+        if (tid == 0) {
+            bool any_changed = false;
+            for (int t = 0; t < T; t++) {
+                if (w->thread_changed[t]) {
+                    any_changed = true;
+                    break;
+                }
+            }
+            if (!any_changed) {
+                *(w->terminated) = true;
+            }
+        }
+
+        // Synchronize on termination flag
+        pthread_barrier_wait(w->barrier2);
+
+        if (*(w->terminated)) {
+            break;
+        }
     }
 
     return NULL;
@@ -90,9 +122,12 @@ int main(void) {
 
     pthread_t* threads = (pthread_t*)malloc(sizeof(pthread_t) * T);
     WorkerArgs* args = (WorkerArgs*)malloc(sizeof(WorkerArgs) * T);
+    bool* thread_changed = (bool*)malloc(sizeof(bool) * T);
+    bool terminated = false;
 
-    pthread_barrier_t barrier;
-    pthread_barrier_init(&barrier, NULL, T);
+    pthread_barrier_t barrier1, barrier2;
+    pthread_barrier_init(&barrier1, NULL, T);
+    pthread_barrier_init(&barrier2, NULL, T);
 
     for (int t = 0; t < T; t++) {
         args[t].thread_id = t;
@@ -101,7 +136,10 @@ int main(void) {
         args[t].num_edges = M;
         args[t].edges = edges;
         args[t].dist = dist;
-        args[t].barrier = &barrier;
+        args[t].thread_changed = thread_changed;
+        args[t].barrier1 = &barrier1;
+        args[t].barrier2 = &barrier2;
+        args[t].terminated = &terminated;
 
         pthread_create(&threads[t], NULL, worker_func, &args[t]);
     }
@@ -110,7 +148,8 @@ int main(void) {
         pthread_join(threads[t], NULL);
     }
 
-    pthread_barrier_destroy(&barrier);
+    pthread_barrier_destroy(&barrier1);
+    pthread_barrier_destroy(&barrier2);
 
     // Print shortest paths
     for (int i = 0; i < V; i++) {
@@ -127,7 +166,7 @@ int main(void) {
     free(dist);
     free(threads);
     free(args);
+    free(thread_changed);
 
     return 0;
 }
-
