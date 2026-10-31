@@ -97,7 +97,27 @@ static void* student_thread_func(void* arg) {
 
         wait_for_turn(s->index);
 
-        // Core student workflow will be populated in next commits
+        // 1. Enter hall (takes 1 time unit)
+        if (s->entered_at == -1 && current_time >= s->arrival_time) {
+            if (!officer_in_hall) {
+                s->entered_at = current_time;
+                s->in_hall = true;
+                printf("%d Student %d enters\n", current_time, s->id);
+                fflush(stdout);
+            }
+        }
+
+        // 2. Scan passport (takes 2 time units)
+        if (s->in_hall && s->entered_at != -1 && s->entered_at <= current_time - 1 &&
+            s->scan_start == -1 && !s->scanned) {
+            if (active_scanners < MAX_SCANNERS) {
+                active_scanners++;
+                s->scan_start = current_time;
+                s->scan_finish = current_time + 2;
+                printf("%d Student %d scans passport\n", current_time, s->id);
+                fflush(stdout);
+            }
+        }
 
         advance_turn();
         pthread_barrier_wait(&tick_end_barrier);
